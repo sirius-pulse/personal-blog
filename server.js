@@ -1,5 +1,20 @@
+require("dotenv").config();
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const cookieParser = require("cookie-parser");
+const requireAuth = require("./middleware/requireAuth");
+
+if (
+    !process.env.JWT_SECRET ||
+    !process.env.ADMIN_USERNAME ||
+    !process.env.ADMIN_PASSWORD_HASH
+) {
+    throw new Error("Missing authentication environment variables");
+}
+
 const express = require("express");
 const cors = require("cors");
+
 
 const app = express();
 const PORT = 3000;
@@ -26,8 +41,16 @@ let articles = [
 let nextId = 3;
 
 //define allowed URL to access the backend API
-app.use(cors({ origin: "http://localhost:5173" }));
+// app.use(cors({ origin: "http://localhost:5173" }));
 app.use(express.json());
+
+app.use(cors({
+    origin: process.env.FRONTEND_URL,
+    credentials: true
+}));
+
+// app.use(express.json());
+app.use(cookieParser());
 
 // Helpers
 function findArticle(id) {
@@ -61,6 +84,80 @@ function validateArticle(body) {
 
     return null;
 }
+
+// Authentication
+app.post("/auth/login", async (req, res) => {
+    const { username, password } = req.body?? {};
+    
+    if (
+        typeof username !== "string" ||
+        typeof password !== "string"
+    ) {
+        return res.status(400).json({
+            message: "Username and password are required"
+        });
+    }
+
+    const validUsername = username === process.env.ADMIN_USERNAME;
+
+    // password is compared against its bcrypt hash.
+    // when credentials match, Express signs a JWT and sends it as an HttpOnly cookie.
+    const validPassword = await bcrypt.compare(
+        password,
+        process.env.ADMIN_PASSWORD_HASH
+    );
+
+    if (!validUsername || !validPassword) {
+        return res.status(401).json({
+            message: "Invalid username or password"
+        });
+    }
+
+    const token = jwt.sign(
+        { role: "admin" },
+        process.env.JWT_SECRET,
+        {
+            algorithm: "HS256",
+            subject: "admin",
+            issuer: "personal-blog",
+            audience: "blog-admin",
+            expiresIn: "1h"
+        }
+    );
+
+    res.cookie("admin_token", token, {
+        ...cookieOptions,
+        maxAge: 60 * 60 * 1000
+    });
+
+    res.json({
+        message: "Login successful",
+        user: {
+            username,
+            role: "admin"
+        }
+    });
+});
+
+// determine whether the admin is already logged in when the page reloads
+app.get("/auth/me", requireAuth, (req, res) => {
+    res.json({
+        authenticated: true,
+        user: {
+            username: process.env.ADMIN_USERNAME,
+            role: req.admin.role
+        }
+    });
+});
+
+
+app.post("/auth/logout", (req, res) => {
+  res.clearCookie("admin_token", cookieOptions);
+
+  res.json({
+    message: "Logout successful"
+  });
+});
 
 // Guest Section
 // GET /home  --> List published articles
@@ -100,27 +197,46 @@ app.get("/article/:pageId", (req, res) => {
 // Admin management
 
 // =======================
-// TODO: Add authentication middleware
+// authentication middleware
 // =======================
+// Reject cross-origin state-changing requests.
+// Helps protect cookie-authenticated routes from CSRF.
+app.use((req, res, next) => {
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+        if (req.get("Origin") !== process.env.FRONTEND_URL) {
+            return res.status(403).json({
+                message: "Request origin not allowed"
+            });
+        }
+    }
+    next();
+});
+
+const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/"
+};
 
 // GET /admin
 // List all articles, including drafts
-app.get("/admin", (req, res) => {
+app.get("/admin", requireAuth, (req, res) => {
     res.json(articles); // for now, we directly render the dummy data. In next update, we need to render from file or DB.
 });
 
 // GET /new
-// Optional metadata for new article form
-app.get("/new", (req, res) => {
-    res.json({
-        fields: ["title", "content", "publishedAt", "status"],
-        statuses: ["draft", "published"]
-    });
-});
+// // Optional metadata for new article form
+// app.get("/new", requireAuth, (req, res) => {
+//     res.json({
+//         fields: ["title", "content", "publishedAt", "status"],
+//         statuses: ["draft", "published"]
+//     });
+// });
 
 // POST /new
 // Create an article
-app.post("/new", (req, res) => {
+app.post("/new", requireAuth, (req, res) => {
     const error = validateArticle(req.body);
     if (error) {
         return res.status(400).json({ message: error });
@@ -146,7 +262,7 @@ app.post("/new", (req, res) => {
 
 // GET /edit/:pageId
 // Retrieve article for editing
-app.get("/edit/:pageId", (req, res) => {
+app.get("/edit/:pageId", requireAuth, (req, res) => {
     // const id = req.params.pageId;
     // res.send(`Edit ID requested: ${id}`);
     const article = findArticle(req.params.pageId);
@@ -160,7 +276,7 @@ app.get("/edit/:pageId", (req, res) => {
 
 // PUT /edit/:pageId
 // update an existing article
-app.put("/edit/:pageId", (req, res) => {
+app.put("/edit/:pageId", requireAuth, (req, res) => {
     const article = findArticle(req.params.pageId);
 
     if (!article) {
@@ -195,7 +311,7 @@ app.put("/edit/:pageId", (req, res) => {
 
 // DELETE /article/:pageId
 // Delete an article
-app.delete("/article/:pageId", (req, res) => {
+app.delete("/article/:pageId", requireAuth, (req, res) => {
     const article = findArticle(req.params.pageId);
     if (!article) {
         return res.status(404).json({
