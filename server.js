@@ -3,6 +3,11 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const cookieParser = require("cookie-parser");
 const requireAuth = require("./middleware/requireAuth");
+const requireAdmin = require("./middleware/requireAdmin");
+
+const authRoutes = require("./routes/auth");
+
+console.log(authRoutes);
 
 if (
     !process.env.JWT_SECRET ||
@@ -42,15 +47,17 @@ let nextId = 3;
 
 //define allowed URL to access the backend API
 // app.use(cors({ origin: "http://localhost:5173" }));
-app.use(express.json());
+
 
 app.use(cors({
     origin: process.env.FRONTEND_URL,
     credentials: true
 }));
 
-// app.use(express.json());
+app.use(express.json());
 app.use(cookieParser());
+
+app.use("/auth", authRoutes);
 
 // Helpers
 function findArticle(id) {
@@ -114,11 +121,11 @@ app.post("/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-        { role: "admin" },
+        { role: user.role },
         process.env.JWT_SECRET,
         {
             algorithm: "HS256",
-            subject: "admin",
+            subject: String(user.id),
             issuer: "personal-blog",
             audience: "blog-admin",
             expiresIn: "1h"
@@ -221,7 +228,7 @@ const cookieOptions = {
 
 // GET /admin
 // List all articles, including drafts
-app.get("/admin", requireAuth, (req, res) => {
+app.get("/admin", requireAuth, requireAdmin, (req, res) => {
     res.json(articles); // for now, we directly render the dummy data. In next update, we need to render from file or DB.
 });
 
@@ -236,7 +243,7 @@ app.get("/admin", requireAuth, (req, res) => {
 
 // POST /new
 // Create an article
-app.post("/new", requireAuth, (req, res) => {
+app.post("/new", requireAuth, requireAdmin, (req, res) => {
     const error = validateArticle(req.body);
     if (error) {
         return res.status(400).json({ message: error });
@@ -276,7 +283,7 @@ app.get("/edit/:pageId", requireAuth, (req, res) => {
 
 // PUT /edit/:pageId
 // update an existing article
-app.put("/edit/:pageId", requireAuth, (req, res) => {
+app.put("/edit/:pageId", requireAuth, requireAdmin, (req, res) => {
     const article = findArticle(req.params.pageId);
 
     if (!article) {
@@ -311,7 +318,7 @@ app.put("/edit/:pageId", requireAuth, (req, res) => {
 
 // DELETE /article/:pageId
 // Delete an article
-app.delete("/article/:pageId", requireAuth, (req, res) => {
+app.delete("/article/:pageId", requireAuth, requireAdmin, (req, res) => {
     const article = findArticle(req.params.pageId);
     if (!article) {
         return res.status(404).json({
@@ -331,7 +338,7 @@ app.delete("/article/:pageId", requireAuth, (req, res) => {
 // Unknown API route
 app.use((req, res) => {
     res.status(404).json({
-        message: "Enedpoint not found."
+        message: "Endpoint not found."
     });
 });
 
