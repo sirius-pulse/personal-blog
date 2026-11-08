@@ -25,12 +25,8 @@ const result = insertUser.run(
   now
 );
 
-console.log("Inserted user ID:", result.lastInsertRowid);
-
 // Retrieve users without exposing password hashes
 const users = db.prepare(`
   SELECT id, username, role, created_at
   FROM users
 `).all();
-
-console.log("Users:", users);

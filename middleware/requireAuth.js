@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 const db = require("../db/database");
 
 function requireAuth(req, res, next) {
-    const token = req.cookies?.admin_token;
+    const token = req.cookies?.admin_token; 
 
     if (!token) {
         return res.status(401).json({
